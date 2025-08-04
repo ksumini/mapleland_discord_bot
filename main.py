@@ -1,3 +1,6 @@
+import asyncio
+
+import aiohttp
 import discord
 from discord.ext import commands
 import os
@@ -28,6 +31,17 @@ setup_show_raids_command(bot)
 setup_delete_raid_command(bot)
 
 
+async def ping_self():
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        try:
+            async with aiohttp.ClientSession() as s:
+                await s.get(os.environ['KOYEP_URL'])
+        except Exception as e:
+            print(f"[ping_self] Error: {e}")
+        await asyncio.sleep(180)
+
+
 @bot.event
 async def on_ready():
     print(f"🤖 Logged in as {bot.user}")
@@ -39,6 +53,8 @@ async def on_ready():
 
     # 🔁 알림 루프 시작 (중복 방지)
     reminder.check_upcoming_raids.start()
+
+    bot.loop.create_task(ping_self())
 
     # 기존 자쿰 일정에 대한 버튼 뷰 등록
     raids = get_all_raids()
