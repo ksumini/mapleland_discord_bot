@@ -1,11 +1,9 @@
 import os
-from dotenv import load_dotenv
 
 import discord
 from discord.ext import commands
 from supabase_storage import get_all_raids, get_raid_by_key, delete_raid_by_key
 
-load_dotenv()
 RAID_ANNOUNCEMENT_CHANNEL_ID = int(os.getenv("RAID_ANNOUNCEMENT_CHANNEL_ID"))
 
 

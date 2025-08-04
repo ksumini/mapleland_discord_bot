@@ -1,6 +1,5 @@
 import discord
 from discord.ext import commands
-from dotenv import load_dotenv
 import os
 
 from supabase_storage import get_all_raids
@@ -13,8 +12,6 @@ from commands.delete_schedule import setup_delete_raid_command
 from tasks import reminder
 
 from views.raid_controls import RaidControlView
-
-load_dotenv()
 
 # 디스코드 API에서 접근 허용 범위(Intents) 설정
 intents = discord.Intents.default()

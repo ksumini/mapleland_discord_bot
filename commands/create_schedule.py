@@ -1,5 +1,4 @@
 import os
-from dotenv import load_dotenv
 import discord
 from discord.ext import commands
 from supabase_storage import create_raid, get_all_raids
@@ -7,7 +6,6 @@ from datetime import datetime
 
 from views.raid_controls import RaidControlView
 
-load_dotenv()
 RAID_ANNOUNCEMENT_CHANNEL_ID = int(os.getenv("RAID_ANNOUNCEMENT_CHANNEL_ID"))
 
 
