@@ -33,6 +33,8 @@ class EditRaidModal(discord.ui.Modal, title="자쿰 일정 수정"):
             await interaction.response.send_message("❌ 관리자만 수정할 수 있습니다.", ephemeral=True)
             return
 
+        await interaction.response.defer(ephemeral=True)
+
         try:
             new_datetime = datetime.strptime(f"{self.date.value} {self.time.value}", "%Y-%m-%d %H:%M")
             max_participants = int(self.max_participants.value)
