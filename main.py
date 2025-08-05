@@ -1,9 +1,10 @@
 import asyncio
 
 import aiohttp
+from aiohttp import web
+import os
 import discord
 from discord.ext import commands
-import os
 
 from supabase_storage import get_all_raids
 from commands.register import setup_register_command
@@ -31,6 +32,21 @@ setup_show_raids_command(bot)
 setup_delete_raid_command(bot)
 
 
+# health check endpoint
+async def health_check(request):
+    return web.Response(text="OK")
+
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/health', health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8000)
+    await site.start()
+    print("✅ Health check server started at /health")
+
+
 async def ping_self():
     await bot.wait_until_ready()
     while not bot.is_closed():
@@ -49,12 +65,8 @@ async def on_ready():
     await bot.tree.sync()
     print("Slash commands synced!")
 
-    # 🔁 reminder.py의 bot에 현재 봇 인스턴스 연결
     reminder.set_bot_instance(bot)
-
-    # 🔁 알림 루프 시작 (중복 방지)
     reminder.check_upcoming_raids.start()
-
     bot.loop.create_task(ping_self())
 
     # 기존 자쿰 일정에 대한 버튼 뷰 등록
@@ -65,5 +77,9 @@ async def on_ready():
     print("✅ Raid views registered!")
 
 
+async def main():
+    await start_web_server()
+    await bot.start(os.getenv("DISCORD_TOKEN"))
+
 if __name__ == "__main__":
-    bot.run(os.getenv("DISCORD_TOKEN"))
+    asyncio.run(main())
