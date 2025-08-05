@@ -1,9 +1,11 @@
 import asyncio
-
 import aiohttp
 import discord
 from discord.ext import commands
 import os
+import threading
+
+from aiohttp import web
 
 from supabase_storage import get_all_raids
 from commands.register import setup_register_command
@@ -15,6 +17,19 @@ from commands.delete_schedule import setup_delete_raid_command
 from tasks import reminder
 
 from views.raid_controls import RaidControlView
+
+
+# ✅ keepalive HTTP 서버
+async def handle_ping(request):
+    return web.Response(text="✅ Bot is alive!")
+
+
+def start_keepalive_server():
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    port = int(os.environ.get("PORT", 8080))  # Koyeb은 보통 8080 포트를 사용
+    web.run_app(app, port=port)
+
 
 # 디스코드 API에서 접근 허용 범위(Intents) 설정
 intents = discord.Intents.default()
@@ -31,17 +46,6 @@ setup_show_raids_command(bot)
 setup_delete_raid_command(bot)
 
 
-async def ping_self():
-    await bot.wait_until_ready()
-    while not bot.is_closed():
-        try:
-            async with aiohttp.ClientSession() as s:
-                await s.get(os.environ['KOYEP_URL'])
-        except Exception as e:
-            print(f"[ping_self] Error: {e}")
-        await asyncio.sleep(180)
-
-
 @bot.event
 async def on_ready():
     print(f"🤖 Logged in as {bot.user}")
@@ -54,8 +58,6 @@ async def on_ready():
     # 🔁 알림 루프 시작 (중복 방지)
     reminder.check_upcoming_raids.start()
 
-    bot.loop.create_task(ping_self())
-
     # 기존 자쿰 일정에 대한 버튼 뷰 등록
     raids = get_all_raids()
     for raid in raids:
@@ -65,4 +67,5 @@ async def on_ready():
 
 
 if __name__ == "__main__":
+    threading.Thread(target=start_keepalive_server).start()
     bot.run(os.getenv("DISCORD_TOKEN"))
