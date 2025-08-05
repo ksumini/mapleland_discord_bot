@@ -52,7 +52,7 @@ async def ping_self():
     while not bot.is_closed():
         try:
             async with aiohttp.ClientSession() as s:
-                resp = await s.get(os.environ['KOYEP_URL'])
+                resp = await s.get(os.environ['KOYEB_URL'])
                 print(f"[ping_self] Self-ping sent. Status: {resp.status}")
         except Exception as e:
             print(f"[ping_self] Error: {e}")
@@ -67,7 +67,7 @@ async def on_ready():
 
     reminder.set_bot_instance(bot)
     reminder.check_upcoming_raids.start()
-    bot.loop.create_task(ping_self())
+    # bot.loop.create_task(ping_self())
 
     # 기존 자쿰 일정에 대한 버튼 뷰 등록
     raids = get_all_raids()
@@ -78,7 +78,7 @@ async def on_ready():
 
 
 async def main():
-    await start_web_server()
+    # await start_web_server()
     await bot.start(os.getenv("DISCORD_TOKEN"))
 
 if __name__ == "__main__":
