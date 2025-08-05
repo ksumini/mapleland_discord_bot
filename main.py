@@ -1,5 +1,4 @@
 import asyncio
-
 import aiohttp
 from aiohttp import web
 import os
@@ -14,13 +13,11 @@ from commands.edit_schedule import setup_edit_raid_command
 from commands.show_schdule import setup_show_raids_command
 from commands.delete_schedule import setup_delete_raid_command
 from tasks import reminder
-
 from views.raid_controls import RaidControlView
 
 # 디스코드 API에서 접근 허용 범위(Intents) 설정
 intents = discord.Intents.default()
 intents.members = True
-
 bot = commands.Bot(command_prefix='.', intents=intents)
 
 # 명령어 파일에서 커맨드 등록
@@ -67,20 +64,19 @@ async def on_ready():
 
     reminder.set_bot_instance(bot)
     reminder.check_upcoming_raids.start()
-    # bot.loop.create_task(ping_self())
 
     # 기존 자쿰 일정에 대한 버튼 뷰 등록
     raids = get_all_raids()
     for raid in raids:
-        raid_id = raid["id"]
-        bot.add_view(RaidControlView(raid_id))
+        bot.add_view(RaidControlView(raid['id']))
     print("✅ Raid views registered!")
 
 
 async def main():
     await asyncio.gather(
         start_web_server(),                     # 웹서버 실행
-        bot.start(os.getenv("DISCORD_TOKEN"))   # 디스코드 봇 실행
+        bot.start(os.getenv("DISCORD_TOKEN")),   # 디스코드 봇 실행
+        ping_self()
     )
 
 
