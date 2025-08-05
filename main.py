@@ -55,7 +55,7 @@ async def on_ready():
     # 🔁 알림 루프 시작 (중복 방지)
     reminder.check_upcoming_raids.start()
 
-    await bot.loop.create_task(ping_self())
+    bot.loop.create_task(ping_self())
 
     # 기존 자쿰 일정에 대한 버튼 뷰 등록
     raids = get_all_raids()
