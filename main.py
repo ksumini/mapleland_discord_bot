@@ -78,7 +78,7 @@ async def on_ready():
 
 
 async def main():
-    # await start_web_server()
+    await start_web_server()
     await bot.start(os.getenv("DISCORD_TOKEN"))
 
 if __name__ == "__main__":
