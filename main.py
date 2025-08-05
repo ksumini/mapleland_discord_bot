@@ -78,8 +78,11 @@ async def on_ready():
 
 
 async def main():
-    await start_web_server()
-    await bot.start(os.getenv("DISCORD_TOKEN"))
+    await asyncio.gather(
+        start_web_server(),                     # 웹서버 실행
+        bot.start(os.getenv("DISCORD_TOKEN"))   # 디스코드 봇 실행
+    )
+
 
 if __name__ == "__main__":
     asyncio.run(main())
