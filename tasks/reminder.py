@@ -1,8 +1,12 @@
 from discord.ext import tasks
-from datetime import datetime
+from datetime import datetime, timedelta
 from supabase_storage import get_all_raids
+from zoneinfo import ZoneInfo
+
 
 bot = None  # 전역 변수로 봇 인스턴스 저장
+
+KST = ZoneInfo("Asia/Seoul")
 
 
 def set_bot_instance(bot_instance):
@@ -33,14 +37,16 @@ async def check_upcoming_raids():
 
     for raid in raids:
         try:
-            raid_time = datetime.strptime(raid["datetime"], "%Y-%m-%d %H:%M")
+            raid_time = datetime.strptime(raid["datetime"], "%Y-%m-%d %H:%M").replace(tzinfo=KST)
         except ValueError:
             continue
 
         # 1시간 전 알림 (±2.5분)
-        if abs((raid_time - now).total_seconds() - 3600) < 150:
+        seconds_left = (raid_time - now).total_seconds()
+        if 3600 <= seconds_left < 3600 + 300:
             await send_raid_reminder(raid, "공대 시작 1시간 전")
 
-        # 전날 오후 8시 알림
-        if now.hour == 20 and (raid_time.date() - now.date()).days == 1:
-            await send_raid_reminder(raid, "내일 공대 참여 확인")
+        # 24시간 전 알림
+        target = raid_time - timedelta(hours=24)
+        if target <= now < target + timedelta(minutes=5):
+            await send_raid_reminder(raid, "공대 시작 24시간 전")

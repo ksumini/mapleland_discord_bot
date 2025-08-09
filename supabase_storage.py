@@ -31,7 +31,7 @@ def create_raid(datetime_str: str, max_participants: int, note: str):
         "waitlist": []
     }
     response = supabase.table("raids").insert(data).execute()
-    print("📦 Insert Response:", response.data)   # 이 부분 중요!
+    print("📦 Insert Response:", response.data)
     return new_id
 
 
