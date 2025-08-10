@@ -12,6 +12,8 @@ from commands.reaction_handler import setup_reaction_handler
 from commands.edit_schedule import setup_edit_raid_command
 from commands.show_schdule import setup_show_raids_command
 from commands.delete_schedule import setup_delete_raid_command
+from commands.calculate_distribution import setup_distribution_command  # ← 추가
+
 from tasks import reminder
 from views.raid_controls import RaidControlView
 
@@ -27,6 +29,7 @@ setup_reaction_handler(bot)
 setup_edit_raid_command(bot)
 setup_show_raids_command(bot)
 setup_delete_raid_command(bot)
+setup_distribution_command(bot)
 
 
 # health check endpoint
