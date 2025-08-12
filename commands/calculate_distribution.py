@@ -154,6 +154,7 @@ def setup_distribution_command(bot: commands.Bot):
             return
 
         info = _extract(pages[0])
+        title = info['title'] or str(info['date'])
 
         embed = discord.Embed(
             title=f"{info['title'] or str(info['date'])}",
