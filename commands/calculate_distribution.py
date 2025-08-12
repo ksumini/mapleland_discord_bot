@@ -1,5 +1,6 @@
 from datetime import datetime, date, timedelta
 import os
+import re
 import asyncio
 import discord
 from discord import app_commands
@@ -17,6 +18,7 @@ if not NOTION_API_KEY or not NOTION_DB_ID:
     raise RuntimeError("Missing NOTION_API_KEY or NOTION_DB_ID")
 
 notion = Client(auth=NOTION_API_KEY)
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _num(prop):
@@ -41,7 +43,7 @@ def _num(prop):
             return r.get("number")
 
 
-def _d(prop):  # date -> datetime.date
+def _date_prop(prop):  # date -> datetime.date
     try:
         s = (prop or {}).get("date", {}).get("start")
         return datetime.fromisoformat(s).date() if s else None
@@ -49,7 +51,7 @@ def _d(prop):  # date -> datetime.date
         return None
 
 
-def _t(prop):  # title/rich_text -> str
+def _text(prop):  # title/rich_text -> str
     arr = (prop or {}).get("title") or (prop or {}).get("rich_text") or []
     return "".join(x.get("plain_text", "") for x in arr) if arr else ""
 
@@ -59,17 +61,17 @@ def _extract(page):
     status = (props.get("정산진행 여부", {}).get("status") or {}).get("name", "")
     total = _num(props.get("총 수익"))
     participants = _num(props.get("참여자 수"))
-    per_person = _num(props.get("인당 분배금"))
+    per_person = int(_num(props.get("인당 분배금")))
     if per_person is None and (total is not None) and (participants and participants > 0):
         per_person = int(total / participants)
 
     return {
-        "date": _d(props.get("날짜")),
-        "title": _t(props.get("정산 세부 페이지")),
-        "status": status,
-        "participants": participants,
-        "total": total,
-        "per_person": per_person,
+        "date": _date_prop(props.get("날짜")),
+        "title": _text(props.get("정산 세부 페이지")),
+        "status": status or "-",
+        "participants": participants or 0,
+        "total": total or 0,
+        "per_person": per_person or 0,
         "url": page.get("url"),
     }
 
@@ -125,27 +127,51 @@ def _query_by_date_blocking(target: date):
     return res.get("results", [])
 
 
+def _query_recent_blocking(limit: int = 25):
+    res = notion.databases.query(
+        database_id=NOTION_DB_ID,
+        sorts=[{"property": "날짜", "direction": "descending"}],
+        page_size=limit,
+    )
+    return res.get("results", [])
+
+
 async def _query_by_date(target: date):
     return await asyncio.to_thread(_query_by_date_blocking, target)
 
 
+async def _query_recent(limit: int = 25):
+    return await asyncio.to_thread(_query_recent_blocking, limit)
+
+
 def setup_distribution_command(bot: commands.Bot):
     @bot.tree.command(name="분배금정산", description="노션 DB에서 정산 정보를 불러옵니다.")
-    @app_commands.describe(날짜="YYYY-MM-DD 형식 (예: 2025-07-27)")
-    async def distribution(interaction: discord.Interaction, 날짜: str):
+    @app_commands.describe(날짜="YYYY-MM-DD 또는 '오늘'/'어제'/'최근'(선택)")
+    async def distribution(interaction: discord.Interaction, 날짜: str | None = None):
         await interaction.response.defer(ephemeral=True)
 
-        # 날짜 파싱
-        try:
+        # 1) 날짜 해석 (옵션/키워드 지원)
+        target_date: date | None = None
+        now_kst = datetime.now(KST).date()
+        if not 날짜 or 날짜 in ("최근", "recent", "latest"):
+            target_date = None  # 최신 레코드 사용
+        elif 날짜 in ("오늘", "today"):
+            target_date = now_kst
+        elif 날짜 in ("어제", "yesterday"):
+            target_date = now_kst - timedelta(days=1)
+        elif DATE_RE.match(날짜):
             y, m, d = map(int, 날짜.split("-"))
             target_date = date(y, m, d)
-        except Exception:
-            await interaction.followup.send("날짜 형식이 올바르지 않습니다. (YYYY-MM-DD)", ephemeral=True)
+        else:
+            await interaction.followup.send("날짜는 `YYYY-MM-DD` 또는 '오늘/어제/최근' 중 하나로 입력해주세요.", ephemeral=True)
             return
 
-        # Notion 호출(타임아웃/예외 처리)
+        # 2) Notion 호출
         try:
-            pages = await asyncio.wait_for(_query_by_date(target_date), timeout=12)
+            if target_date is None:
+                pages = await asyncio.wait_for(_query_recent(1), timeout=12)
+            else:
+                pages = await asyncio.wait_for(_query_by_date(target_date), timeout=12)
         except asyncio.TimeoutError:
             await interaction.followup.send("⏳ Notion 응답이 지연됩니다. 잠시 후 다시 시도해주세요.", ephemeral=True)
             return
@@ -157,10 +183,11 @@ def setup_distribution_command(bot: commands.Bot):
             return
 
         if not pages:
-            await interaction.followup.send("해당 날짜의 정산 정보를 찾지 못했어요.", ephemeral=True)
+            await interaction.followup.send("해당 조건의 정산 정보를 찾지 못했어요.", ephemeral=True)
             return
 
         info = _extract(pages[0])
+        title = info['title'] or str(info['date'])
 
         embed = discord.Embed(
             title=f"정산 — {info['title'] or str(info['date'])}",
@@ -174,3 +201,26 @@ def setup_distribution_command(bot: commands.Bot):
         embed.add_field(name="인당 분배금", value=f"{(info['per_person'] or 0):,}원", inline=True)
 
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+    # 3) 자동완성: 최근 날짜 25개 제안 (접두어 매칭)
+    @distribution.autocomplete("날짜")
+    async def date_auto(interaction: discord.Interaction, current: str):
+        try:
+            pages = await asyncio.wait_for(_query_recent(limit=25), timeout=8)
+        except Exception:
+            return []
+        # 노션 날짜 → 'YYYY-MM-DD' 문자열로 변환
+        dates = []
+        for p in pages:
+            d = _date_prop(p.get("properties", {}).get("날짜"))
+            if d:
+                s = d.isoformat()
+                if s not in dates:
+                    dates.append(s)
+        # 키워드 + 접두어 필터
+        base = ["오늘", "어제", "최근"]
+        candidates = base + dates
+        if current:
+            candidates = [c for c in candidates if c.startswith(current)]
+        # 25개 제한
+        return [app_commands.Choice(name=c, value=c) for c in candidates[:25]]
