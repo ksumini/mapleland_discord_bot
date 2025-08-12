@@ -1,11 +1,9 @@
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 from discord.ext import tasks
-
 from supabase_storage import get_all_raids
+from utils.datetime_util import parse_kst, KST
 
 bot = None  # 전역 변수로 봇 인스턴스 저장
-KST = ZoneInfo("Asia/Seoul")
 
 # 직전 루프 시각(알림 중복/누락 방지용)
 _last_tick: datetime | None = None
@@ -58,7 +56,6 @@ async def send_raid_reminder(raid, message_type):
 async def check_upcoming_raids():
     """지난 루프~이번 루프 사이에 '목표시각을 통과'했으면 알림 발송."""
     global _last_tick
-
     now = datetime.now(KST)
 
     # 첫 루프에서는 기준점만 잡고 종료 (다음 루프부터 판정)
@@ -68,8 +65,7 @@ async def check_upcoming_raids():
             print(f"[reminder] first tick; anchor set to {now.isoformat()}")
         return
 
-    window_start = _last_tick
-    window_end = now
+    window_start, window_end = _last_tick, now
     _last_tick = now
 
     if DEBUG:
@@ -84,7 +80,7 @@ async def check_upcoming_raids():
 
     for raid in raids:
         try:
-            raid_time = datetime.strptime(raid["datetime"], "%Y-%m-%d %H:%M").replace(tzinfo=KST)
+            raid_time = parse_kst(raid["datetime"])
         except Exception as e:
             print(f"[reminder] bad datetime ({raid.get('datetime')}): {e}")
             continue
