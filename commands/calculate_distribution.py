@@ -1,54 +1,75 @@
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
+import os
+import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
 from notion_client import Client
-import os
+from notion_client.errors import APIResponseError
+from zoneinfo import ZoneInfo
+
+KST = ZoneInfo("Asia/Seoul")
 
 NOTION_API_KEY = os.getenv("NOTION_API_KEY")
-NOTION_DB_ID = os.getenv("NOTION_DISTRIBUTION_DB_ID")
+NOTION_DB_ID = os.getenv("NOTION_DISTRIBUTION_DB_ID") or os.getenv("NOTION_SETTLEMENT_DB_ID")
+
+if not NOTION_API_KEY or not NOTION_DB_ID:
+    raise RuntimeError("Missing NOTION_API_KEY or NOTION_DB_ID")
 
 notion = Client(auth=NOTION_API_KEY)
 
 
-def parse_number(prop):
-    return prop.get("number")
+def _n(prop):  # number
+    return prop.get("number") if isinstance(prop, dict) else None
 
 
-def parse_date(prop):
-    if prop.get("date") and prop["date"].get("start"):
-        return datetime.fromisoformat(prop["date"]["start"]).date()
-    return None
+def _d(prop):  # date -> datetime.date
+    try:
+        s = (prop or {}).get("date", {}).get("start")
+        return datetime.fromisoformat(s).date() if s else None
+    except Exception:
+        return None
 
 
-def parse_text(prop):
-    arr = prop.get("title") or prop.get("rich_text", [])
-    return "".join([x.get("plain_text", "") for x in arr]) if arr else ""
+def _t(prop):  # title/rich_text -> str
+    arr = (prop or {}).get("title") or (prop or {}).get("rich_text") or []
+    return "".join(x.get("plain_text", "") for x in arr) if arr else ""
 
 
-def query_by_date(target_date: date):
+def _extract(page):
+    props = page.get("properties", {}) if isinstance(page, dict) else {}
+    status = (props.get("정산진행 여부", {}).get("status") or {}).get("name", "")
+    return {
+        "date": _d(props.get("날짜")),
+        "title": _t(props.get("정산 세부 페이지")),
+        "status": status,
+        "participants": _n(props.get("참여자 수")),
+        "total": _n(props.get("총 수익")),
+        "per_person": _n(props.get("인당 분배금")),
+        "url": page.get("url"),
+    }
+
+
+# 동기 Notion 호출을 스레드로 오프로딩
+def _query_by_date_blocking(target: date):
+    start = datetime(target.year, target.month, target.day, tzinfo=KST)
+    end = start + timedelta(days=1)
     res = notion.databases.query(
         database_id=NOTION_DB_ID,
-        filter={"property": "날짜", "date": {
-            "on_or_after": target_date.isoformat(),
-            "on_or_before": target_date.isoformat()
-        }},
-        page_size=1
+        filter={
+            "and": [
+                {"property": "날짜", "date": {"on_or_after": start.isoformat()}},
+                {"property": "날짜", "date": {"before": end.isoformat()}},
+            ]
+        },
+        sorts=[{"property": "날짜", "direction": "descending"}],
+        page_size=1,
     )
     return res.get("results", [])
 
 
-def extract_page_info(page):
-    props = page["properties"]
-    return {
-        "date": parse_date(props["날짜"]),
-        "title": parse_text(props["정산 세부 페이지"]),
-        "status": props["정산진행 여부"]["status"]["name"] if props.get("정산진행 여부") else "",
-        "participants": parse_number(props["참여자 수"]),
-        "total": parse_number(props["총 수익"]),
-        "per_person": parse_number(props["인당 분배금"]),
-        "url": page.get("url")
-    }
+async def _query_by_date(target: date):
+    return await asyncio.to_thread(_query_by_date_blocking, target)
 
 
 def setup_distribution_command(bot: commands.Bot):
@@ -57,29 +78,42 @@ def setup_distribution_command(bot: commands.Bot):
     async def distribution(interaction: discord.Interaction, 날짜: str):
         await interaction.response.defer(ephemeral=True)
 
+        # 날짜 파싱
         try:
             y, m, d = map(int, 날짜.split("-"))
             target_date = date(y, m, d)
-        except ValueError:
+        except Exception:
             await interaction.followup.send("날짜 형식이 올바르지 않습니다. (YYYY-MM-DD)", ephemeral=True)
             return
 
-        pages = query_by_date(target_date)
-        if not pages:
-            await interaction.followup.send("해당 날짜의 정산 정보를 찾을 수 없습니다.", ephemeral=True)
+        # Notion 호출(타임아웃/예외 처리)
+        try:
+            pages = await asyncio.wait_for(_query_by_date(target_date), timeout=12)
+        except asyncio.TimeoutError:
+            await interaction.followup.send("⏳ Notion 응답이 지연됩니다. 잠시 후 다시 시도해주세요.", ephemeral=True)
+            return
+        except APIResponseError as e:
+            await interaction.followup.send(f"⚠️ Notion API 오류({e.status}). 통합 권한/DB ID를 확인해주세요.", ephemeral=True)
+            return
+        except Exception as e:
+            await interaction.followup.send(f"⚠️ 오류가 발생했어요: {e}", ephemeral=True)
             return
 
-        page_info = extract_page_info(pages[0])
+        if not pages:
+            await interaction.followup.send("해당 날짜의 정산 정보를 찾지 못했어요.", ephemeral=True)
+            return
+
+        info = _extract(pages[0])
 
         embed = discord.Embed(
-            title=f"정산 — {page_info['title']}",
-            url=page_info["url"],
+            title=f"정산 — {info['title'] or str(info['date'])}",
+            url=info.get("url"),
             color=discord.Color.green()
         )
-        embed.add_field(name="날짜", value=str(page_info["date"]), inline=True)
-        embed.add_field(name="정산 상태", value=page_info["status"], inline=True)
-        embed.add_field(name="참여자 수", value=str(page_info["participants"]), inline=True)
-        embed.add_field(name="총 수익", value=f"{page_info['total']:,}원", inline=True)
-        embed.add_field(name="인당 분배금", value=f"{page_info['per_person']:,}원", inline=True)
+        embed.add_field(name="날짜", value=str(info["date"]), inline=True)
+        embed.add_field(name="정산 상태", value=info["status"] or "—", inline=True)
+        embed.add_field(name="참여자 수", value=str(info["participants"] or 0), inline=True)
+        embed.add_field(name="총 수익", value=f"{(info['total'] or 0):,}원", inline=True)
+        embed.add_field(name="인당 분배금", value=f"{(info['per_person'] or 0):,}원", inline=True)
 
         await interaction.followup.send(embed=embed, ephemeral=True)
