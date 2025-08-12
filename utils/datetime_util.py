@@ -10,4 +10,6 @@ def parse_kst(dt_str: str) -> datetime:
     예) "2025-08-12 13:30" 또는 "2025-08-12T13:30:00"
     """
     dt = datetime.fromisoformat(dt_str)
-    return dt if dt.tzinfo else dt.replace(tzinfo=KST)
+    # 타임존이 있으면 KST로 변환, 없으면 KST 부여
+    dt = dt.astimezone(KST) if dt.tzinfo else dt.replace(tzinfo=KST)
+    return dt
