@@ -76,39 +76,6 @@ def _extract(page):
     }
 
 
-def _d(prop):  # date -> datetime.date
-    try:
-        s = (prop or {}).get("date", {}).get("start")
-        return datetime.fromisoformat(s).date() if s else None
-    except Exception:
-        return None
-
-
-def _t(prop):  # title/rich_text -> str
-    arr = (prop or {}).get("title") or (prop or {}).get("rich_text") or []
-    return "".join(x.get("plain_text", "") for x in arr) if arr else ""
-
-
-def _extract(page):
-    props = page.get("properties", {}) if isinstance(page, dict) else {}
-    status = (props.get("정산진행 여부", {}).get("status") or {}).get("name", "")
-    total = _num(props.get("총 수익"))
-    participants = _num(props.get("참여자 수"))
-    per_person = _num(props.get("인당 분배금"))
-    if per_person is None and (total is not None) and (participants and participants > 0):
-        per_person = int(total / participants)
-
-    return {
-        "date": _d(props.get("날짜")),
-        "title": _t(props.get("정산 세부 페이지")),
-        "status": status,
-        "participants": participants,
-        "total": total,
-        "per_person": per_person,
-        "url": page.get("url"),
-    }
-
-
 # 동기 Notion 호출을 스레드로 오프로딩
 def _query_by_date_blocking(target: date):
     start = datetime(target.year, target.month, target.day, tzinfo=KST)
@@ -187,10 +154,9 @@ def setup_distribution_command(bot: commands.Bot):
             return
 
         info = _extract(pages[0])
-        title = info['title'] or str(info['date'])
 
         embed = discord.Embed(
-            title=f"정산 — {info['title'] or str(info['date'])}",
+            title=f"{info['title'] or str(info['date'])}",
             url=info.get("url"),
             color=discord.Color.green()
         )
@@ -202,11 +168,11 @@ def setup_distribution_command(bot: commands.Bot):
 
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    # 3) 자동완성: 최근 날짜 25개 제안 (접두어 매칭)
+    # 3) 자동완성: 최근 날짜 10개 제안 (접두어 매칭)
     @distribution.autocomplete("날짜")
     async def date_auto(interaction: discord.Interaction, current: str):
         try:
-            pages = await asyncio.wait_for(_query_recent(limit=25), timeout=8)
+            pages = await asyncio.wait_for(_query_recent(limit=10), timeout=8)
         except Exception:
             return []
         # 노션 날짜 → 'YYYY-MM-DD' 문자열로 변환
@@ -222,5 +188,5 @@ def setup_distribution_command(bot: commands.Bot):
         candidates = base + dates
         if current:
             candidates = [c for c in candidates if c.startswith(current)]
-        # 25개 제한
-        return [app_commands.Choice(name=c, value=c) for c in candidates[:25]]
+        # 10개 제한
+        return [app_commands.Choice(name=c, value=c) for c in candidates[:10]]
