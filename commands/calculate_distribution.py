@@ -19,8 +19,26 @@ if not NOTION_API_KEY or not NOTION_DB_ID:
 notion = Client(auth=NOTION_API_KEY)
 
 
-def _n(prop):  # number
-    return prop.get("number") if isinstance(prop, dict) else None
+def _num(prop):
+    if not isinstance(prop, dict):
+        return None
+    t = prop.get("type")
+
+    # 기본 number
+    if t == "number":
+        return prop.get("number")
+
+    # formula(number)
+    if t == "formula":
+        f = prop.get("formula") or {}
+        if f.get("type") == "number":
+            return f.get("number")
+
+    # rollup(number)
+    if t == "rollup":
+        r = prop.get("rollup") or {}
+        if r.get("type") == "number":
+            return r.get("number")
 
 
 def _d(prop):  # date -> datetime.date
@@ -39,13 +57,19 @@ def _t(prop):  # title/rich_text -> str
 def _extract(page):
     props = page.get("properties", {}) if isinstance(page, dict) else {}
     status = (props.get("정산진행 여부", {}).get("status") or {}).get("name", "")
+    total = _num(props.get("총 수익"))
+    participants = _num(props.get("참여자 수"))
+    per_person = _num(props.get("인당 분배금"))
+    if per_person is None and (total is not None) and (participants and participants > 0):
+        per_person = int(total / participants)
+
     return {
         "date": _d(props.get("날짜")),
         "title": _t(props.get("정산 세부 페이지")),
         "status": status,
-        "participants": _n(props.get("참여자 수")),
-        "total": _n(props.get("총 수익")),
-        "per_person": _n(props.get("인당 분배금")),
+        "participants": participants,
+        "total": total,
+        "per_person": per_person,
         "url": page.get("url"),
     }
 
