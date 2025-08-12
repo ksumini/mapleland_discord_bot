@@ -3,6 +3,7 @@ import discord
 from discord.ext import commands
 from supabase_storage import create_raid, get_all_raids
 from datetime import datetime
+import asyncio
 
 from views.raid_controls import RaidControlView
 
@@ -20,12 +21,15 @@ class CreateRaidModal(discord.ui.Modal, title="자쿰 공대 일정 생성"):
         self.interaction = interaction
 
     async def on_submit(self, interaction: discord.Interaction):
+        # 3초 타임아웃 방지
+        await interaction.response.defer(ephemeral=True)
+
         # 관리자 체크
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("❌ 이 명령어는 관리자만 사용할 수 있어요.", ephemeral=True)
             return
 
-        # 날짜와 시간 파싱
+        # 날짜와 시간 파싱/검증
         try:
             raid_datetime = datetime.strptime(f"{self.date.value} {self.time.value}", "%Y-%m-%d %H:%M")
             max_participants = int(self.max_participants.value)
@@ -42,24 +46,36 @@ class CreateRaidModal(discord.ui.Modal, title="자쿰 공대 일정 생성"):
             return
 
         key = raid_datetime.strftime("%Y-%m-%d %H:%M")
-        # Supabase에서 기존 일정 확인
-        raids = get_all_raids()
 
+        # 기존 일정 중복 확인 (블로킹 I/O는 스레드로)
+        try:
+            raids = await asyncio.to_thread(get_all_raids)
+        except Exception as e:
+            await interaction.followup.send(f"⚠️ 일정 조회 중 오류: {e}", ephemeral=True)
+            return
         if any(r["datetime"] == key for r in raids):
             await interaction.response.send_message(f"⚠️ 이미 `{key}` 일정이 존재합니다.", ephemeral=True)
             return
 
         # 공대 일정 메시지를 공지 채널로 전송
-        channel = interaction.guild.get_channel(RAID_ANNOUNCEMENT_CHANNEL_ID)
-        if channel:
+        channel = interaction.client.get_channel(RAID_ANNOUNCEMENT_CHANNEL_ID)
+        if channel is None:
+            try:
+                channel = await interaction.client.fetch_channel(RAID_ANNOUNCEMENT_CHANNEL_ID)
+            except Exception:
+                channel = interaction.channel
+
+        # 안내 메시지 + View 전송
+        try:
+            pretty_when = datetime.strptime(key, "%Y-%m-%d %H:%M").strftime("%Y-%m-%d (%a) %H:%M")
             embed = discord.Embed(
                 title="🔔 New 자쿰 공대 일정 생성!",
                 description=(
                     "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"📅 **일시:** {datetime.strptime(key, '%Y-%m-%d %H:%M').strftime('%Y-%m-%d (%a) %H:%M')}\n"
+                    f"📅 **일시:** {pretty_when}\n"
                     f"👥 **최대 인원:** {max_participants}명\n\n"
                     "📝 **특이사항:**\n"
-                    f"{self.note.value.strip() if self.note.value else '지금부터 참여 신청 받습니다!'}\n"
+                    f"{(self.note.value or '').strip() or '지금부터 참여 신청 받습니다!'}\n"
                     "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                     "✅ 눌러 참여 신청하세요!"
                 ),
@@ -68,18 +84,28 @@ class CreateRaidModal(discord.ui.Modal, title="자쿰 공대 일정 생성"):
             view = RaidControlView(raid_key=key)
             msg = await channel.send(embed=embed, view=view)
             await msg.add_reaction("✅")
+        except Exception as e:
+            await interaction.followup.send(f"⚠️ 공지 채널로 메시지 전송 실패: {e}", ephemeral=True)
+            return
 
-            # Supabase에 일정 저장
-            raid_id = create_raid(
+        # Supabase에 일정 저장
+        try:
+            raid_id = await asyncio.to_thread(
+                create_raid,
                 datetime_str=key,
                 max_participants=max_participants,
-                note=self.note.value.strip() if self.note.value else ""
+                note=(self.note.value or "").strip()
             )
-            # message_id도 업데이트
+            # message_id 업데이트
             from supabase_client import supabase
-            supabase.table("raids").update({"message_id": msg.id}).eq("id", raid_id).execute()
+            await asyncio.to_thread(
+                lambda: supabase.table("raids").update({"message_id": msg.id}).eq("id", raid_id).execute()
+            )
+        except Exception as e:
+            await interaction.followup.send(f"⚠️ 일정 저장 중 오류: {e}", ephemeral=True)
+            return
 
-            await interaction.response.send_message("✅ 공대 일정이 생성되었고, 공지 채널에 안내 메시지를 보냈어요!", ephemeral=True)
+        await interaction.followup.send("✅ 공대 일정이 생성되었고, 공지 채널에 안내 메시지를 보냈어요!", ephemeral=True)
 
 
 def setup_create_raid_command(bot: commands.Bot):
