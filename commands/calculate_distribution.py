@@ -74,6 +74,39 @@ def _extract(page):
     }
 
 
+def _d(prop):  # date -> datetime.date
+    try:
+        s = (prop or {}).get("date", {}).get("start")
+        return datetime.fromisoformat(s).date() if s else None
+    except Exception:
+        return None
+
+
+def _t(prop):  # title/rich_text -> str
+    arr = (prop or {}).get("title") or (prop or {}).get("rich_text") or []
+    return "".join(x.get("plain_text", "") for x in arr) if arr else ""
+
+
+def _extract(page):
+    props = page.get("properties", {}) if isinstance(page, dict) else {}
+    status = (props.get("정산진행 여부", {}).get("status") or {}).get("name", "")
+    total = _num(props.get("총 수익"))
+    participants = _num(props.get("참여자 수"))
+    per_person = _num(props.get("인당 분배금"))
+    if per_person is None and (total is not None) and (participants and participants > 0):
+        per_person = int(total / participants)
+
+    return {
+        "date": _d(props.get("날짜")),
+        "title": _t(props.get("정산 세부 페이지")),
+        "status": status,
+        "participants": participants,
+        "total": total,
+        "per_person": per_person,
+        "url": page.get("url"),
+    }
+
+
 # 동기 Notion 호출을 스레드로 오프로딩
 def _query_by_date_blocking(target: date):
     start = datetime(target.year, target.month, target.day, tzinfo=KST)
