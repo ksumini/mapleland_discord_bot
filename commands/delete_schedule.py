@@ -1,4 +1,6 @@
 import os
+from datetime import datetime
+from utils.datetime_util import parse_kst, KST
 
 import discord
 from discord.ext import commands
@@ -15,11 +17,14 @@ def setup_delete_raid_command(bot: commands.Bot):
             return
 
         raids = get_all_raids()
-        if not raids:
+        now = datetime.now(KST)
+        upcoming_raids = [r for r in raids if parse_kst(r["datetime"]) >= now]
+
+        if not upcoming_raids:
             await interaction.response.send_message("⚠️ 삭제할 일정이 없습니다.", ephemeral=True)
             return
 
-        sorted_raids = sorted(raids, key=lambda r: r["datetime"], reverse=True)
+        sorted_raids = sorted(upcoming_raids, key=lambda r: r["datetime"])
         options = [discord.SelectOption(label=raid["datetime"], value=raid["datetime"]) for raid in sorted_raids[:25]]
 
         class DeleteDropdown(discord.ui.Select):

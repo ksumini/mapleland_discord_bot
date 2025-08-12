@@ -1,9 +1,10 @@
 import os
+from datetime import datetime
+from utils.datetime_util import parse_kst, KST
 
 import discord
 from discord.ext import commands
 from supabase_storage import get_all_raids, get_raid_by_key, update_raid
-from datetime import datetime
 
 RAID_ANNOUNCEMENT_CHANNEL_ID = int(os.getenv("RAID_ANNOUNCEMENT_CHANNEL_ID"))
 
@@ -139,11 +140,14 @@ def setup_edit_raid_command(bot: commands.Bot):
             await interaction.response.send_message("❌ 관리자만 사용할 수 있습니다.", ephemeral=True)
             return
 
-        if not raids:
+        now = datetime.now(KST)
+        upcoming_raids = [r for r in raids if parse_kst(r["datetime"]) >= now]
+
+        if not upcoming_raids:
             await interaction.response.send_message("⚠️ 수정할 일정이 없습니다.", ephemeral=True)
             return
 
-        sorted_raids = sorted(raids, key=lambda r: r["datetime"], reverse=True)
+        sorted_raids = sorted(upcoming_raids, key=lambda r: r["datetime"])
         options = [
             discord.SelectOption(label=raid["datetime"], value=raid["datetime"])
             for raid in sorted_raids[:25]
